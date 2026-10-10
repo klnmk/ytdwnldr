@@ -43,6 +43,7 @@ def apply_theme(app: QApplication):
         QCheckBox::indicator:checked { background: #C9F23C; image: url("CHECK_ASSET"); }
         QTableView, QListView { background: #F8F6F0; alternate-background-color: #ECEAE2; border: none; gridline-color: #D8D7D1; selection-background-color: #D9EDEE; selection-color: #171717; }
         QTableView::item { padding: 5px; }
+        QTableView::item:hover { background: #C9E5E6; }
         QHeaderView::section { background: #E7E4DB; border: none; border-bottom: 1px solid #171717; padding: 7px 8px; font-size: 11px; font-weight: 600; }
         QScrollBar:vertical { background: #E7E4DB; width: 10px; margin: 0; }
         QScrollBar::handle:vertical { background: #898980; min-height: 24px; }

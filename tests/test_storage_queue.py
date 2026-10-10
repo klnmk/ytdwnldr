@@ -158,3 +158,96 @@ def test_large_playlist_selection(qt):
     assert not model.selected
     model.select_all(True)
     assert len(model.selected_entries()) == 9000
+
+
+@pytest.mark.parametrize("state", [State.FAILED, State.COMPLETED, State.CANCELLED, State.WAITING])
+def test_remove_persists_without_deleting_media(queue, tmp_path, state):
+    media = tmp_path / "keep.mp3"
+    media.write_bytes(b"existing media")
+    task = make_task()
+    task.state, task.path = state, str(media)
+    queue.tasks.append(task)
+    queue.remove(task)
+    assert not queue.tasks and not queue.storage.load_history()
+    assert media.read_bytes() == b"existing media"
+    queue.retry(task)
+    queue.pump()
+    assert not queue.running
+
+
+def test_removed_pending_job_never_starts(queue):
+    queue.parallel = 1
+    tasks = [make_task(i) for i in range(3)]
+    queue.add(tasks)
+    queue.pump()
+    queue.remove(tasks[1])
+    queue.finished(tasks[0], 1)
+    queue.pump()
+    assert tasks[1].id not in queue.running and tasks[1] not in queue.tasks
+    assert list(queue.running) == [tasks[2].id]
+
+
+@pytest.mark.parametrize("state", [State.DOWNLOADING, State.CONVERTING])
+def test_remove_active_ignores_late_worker_events(queue, state):
+    task = make_task()
+    queue.add([task])
+    queue.pump()
+    task.state = state
+    process = queue.running[task.id]
+    queue.remove(task)
+    assert process.cancelled and not queue.tasks
+    process.event.emit({"event": "state", "state": State.DOWNLOADING.value})
+    process.event.emit({"event": "completed", "path": "late.mp3"})
+    process.done.emit(0)
+    assert not queue.running and not queue.tasks and not queue.storage.load_history()
+    assert not task.path
+
+
+def test_clear_mixed_queue_cancels_workers_and_keeps_files(queue, tmp_path):
+    tasks = [make_task(i) for i in range(6)]
+    queue.add(tasks)
+    queue.pump()
+    tasks[3].state = State.FAILED
+    tasks[4].state = State.COMPLETED
+    tasks[5].state = State.CANCELLED
+    media = tmp_path / "done.mp4"
+    media.write_bytes(b"finished")
+    tasks[4].path = str(media)
+    processes = list(queue.running.values())
+    queue.clear()
+    assert all(process.cancelled for process in processes)
+    for process in processes:
+        process.done.emit(1)
+    queue.pump()
+    assert not queue.tasks and not queue.running and not queue.storage.load_history()
+    assert media.read_bytes() == b"finished"
+
+
+def test_completed_size_is_read_from_output_not_source(queue, tmp_path):
+    media = tmp_path / "converted.mp3"
+    media.write_bytes(b"x" * 1234)
+    task = make_task()
+    queue.add([task])
+    queue.pump()
+    queue.handle_event(task, {"event": "progress", "downloaded_bytes": 1000000, "total_bytes": 2000000, "stream_label": "Звук", "progress": 50})
+    queue.handle_event(task, {"event": "completed", "path": str(media), "final_size": 999999})
+    queue.finished(task, 0)
+    assert task.final_size == 1234
+    queue.persist()
+    assert queue.storage.load_history()[0].final_size == 1234
+    task.state = State.CANCELLED
+    queue.retry(task)
+    assert task.final_size is None and task.downloaded_bytes == 0 and task.total_bytes is None
+
+
+def test_stream_transition_and_processing_keep_source_size_distinct(queue):
+    task = make_task()
+    queue.add([task])
+    queue.pump()
+    queue.handle_event(task, {"event": "progress", "progress": 90, "downloaded_bytes": 9000, "total_bytes": 10000, "stream_label": "Видео"})
+    queue.handle_event(task, {"event": "progress", "progress": 20, "downloaded_bytes": 200, "total_bytes": 1000, "total_estimated": True, "stream_label": "Звук"})
+    assert task.downloaded_bytes == 200 and task.total_bytes == 1000 and task.total_estimated
+    queue.handle_event(task, {"event": "state", "state": State.MERGING.value})
+    assert task.downloaded_bytes == 200 and task.final_size is None
+    queue.handle_event(task, {"event": "state", "state": State.DOWNLOADING.value})
+    assert task.downloaded_bytes == 0 and not task.stream_label and task.total_bytes is None

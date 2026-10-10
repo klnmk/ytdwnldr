@@ -26,7 +26,7 @@ def main():
     window = MainWindow(storage)
     original_tasks = window.queue.tasks.copy()
     window.queue.tasks.clear()
-    window.prefs.folder = "artifacts/live-queue"
+    window.prefs.folder = "artifacts/live-queue-upgrade"
     window.prefs.output = "mp3"
     window.prefs.bitrate = 192
     window.audio_mode.setChecked(True)
@@ -49,7 +49,7 @@ def main():
             requested = True
             window.start_download()
         if window.queue.tasks and all(t.state in TERMINAL for t in window.queue.tasks) and not window.queue.running:
-            result.update({"seconds": round(now - start, 2), "max_event_loop_gap_seconds": round(max(samples), 3), "states": [t.state.value for t in window.queue.tasks], "errors": [t.error for t in window.queue.tasks if t.error], "paths": [t.path for t in window.queue.tasks]})
+            result.update({"seconds": round(now - start, 2), "max_event_loop_gap_seconds": round(max(samples), 3), "states": [t.state.value for t in window.queue.tasks], "errors": [t.error for t in window.queue.tasks if t.error], "paths": [t.path for t in window.queue.tasks], "final_sizes": [t.final_size for t in window.queue.tasks], "size_matches_disk": all(t.final_size == Path(t.path).stat().st_size for t in window.queue.tasks if t.path)})
             window.grab().save(str(ROOT / "artifacts" / "ui-live-download.png"))
             window.queue.tasks = original_tasks
             window.close()

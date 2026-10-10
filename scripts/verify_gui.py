@@ -31,7 +31,7 @@ def main():
     for name in ("ffmpeg.exe", "ffprobe.exe", "deno.exe"):
         (binaries / name).touch()
     window = MainWindow(storage)
-    window.resize(1080, 850)
+    window.resize(1080, 920)
     window.show()
     application.processEvents()
     window.grab().save(str(out / "ui-empty.png"))
@@ -44,6 +44,12 @@ def main():
     window.change_mode(False)
     for i, state in enumerate((State.DOWNLOADING, State.CONVERTING, State.COMPLETED, State.FAILED)):
         task = Task(f"url{i}", sample["entries"][i]["title"], {"output": "mp3", "bitrate": 192}, str(ROOT / "downloads"), playlist=sample["title"], index=i + 1, state=state, progress=64 if i == 0 else -1, speed=2.8 * 1048576 if i == 0 else 0, eta=24 if i == 0 else None, error="Видео недоступно." if i == 3 else "")
+        # Explicit review fixtures, never used by the production queue.
+        task.downloaded_bytes = 48 * 1048576
+        task.total_bytes = 75 * 1048576
+        task.total_estimated = True
+        task.stream_label = "Звук"
+        task.final_size = 9 * 1048576 if state == State.COMPLETED else None
         window.queue.tasks.append(task)
     window.queue_model.refresh()
     window.queue_summary()

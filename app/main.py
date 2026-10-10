@@ -5,7 +5,8 @@ import sys
 
 
 def run() -> int:
-    if "--verify-startup" in sys.argv:
+    ui_verification = "--verify-ui" in sys.argv
+    if "--verify-startup" in sys.argv or ui_verification:
         from pathlib import Path
         root = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent
         (root / "data").mkdir(exist_ok=True)
@@ -18,7 +19,7 @@ def run() -> int:
     from app.ui.window import MainWindow
 
     application = QApplication(sys.argv)
-    if "--verify-startup" in sys.argv:
+    if "--verify-startup" in sys.argv or ui_verification:
         (root / "data" / "startup-stage.txt").write_text("Qt initialized", encoding="utf-8")
     application.setApplicationName("СЪЁМ")
     application.setOrganizationName("СЪЁМ")
@@ -27,7 +28,7 @@ def run() -> int:
     translator.load(str(asset_root() / "translations" / "qtbase_ru.qm"))
     application.installTranslator(translator)
     try:
-        storage = Storage()
+        storage = Storage(root / "data" / "ui-verification") if ui_verification else Storage()
         storage.configure_logging()
         window = MainWindow(storage)
     except UserError as exc:
@@ -39,6 +40,8 @@ def run() -> int:
         window.show_error("Ошибка приложения. Подробности сохранены в журнале.")
 
     sys.excepthook = exception_hook
+    if ui_verification and application.platformName() == "windows":
+        window.setWindowOpacity(0)
     window.show()
     if "--verify-startup" in sys.argv:
         (root / "data" / "startup-stage.txt").write_text("window shown", encoding="utf-8")
@@ -49,4 +52,20 @@ def run() -> int:
             (storage.data / "startup-ready.txt").write_text("ready", encoding="utf-8")
         QTimer.singleShot(100, verified)
         QTimer.singleShot(8000, window.close)
+    if ui_verification:
+        def verify_updated_ui():
+            import json
+            from app.ui.verification import verify_ui
+            try:
+                result = verify_ui(window)
+                (storage.data / "verification-result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
+            except Exception as exc:
+                logging.exception("UI verification failed")
+                (storage.data / "verification-result.json").write_text(json.dumps({"error": str(exc)}), encoding="utf-8")
+                window.queue.tasks.clear()
+                window.close()
+                application.exit(1)
+                return
+            window.close()
+        QTimer.singleShot(200, verify_updated_ui)
     return application.exec()

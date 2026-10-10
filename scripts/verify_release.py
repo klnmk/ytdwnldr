@@ -67,6 +67,19 @@ def main():
     print(json.dumps(results, ensure_ascii=True, indent=2))
     assert worker.returncode == 0 and any(e.get("event") == "metadata" for e in events), "Frozen metadata worker failed; see release-metrics.json"
     assert all(Path(e["path"]).exists() for e in events if e.get("event") == "thumbnail"), "Frozen worker corrupted a Unicode path"
+    ui_checks = []
+    for platform, scale in (("offscreen", "1"), ("windows", "1"), ("windows", "1.25"), ("windows", "1.5")):
+        check_environment = {**environment, "QT_QPA_PLATFORM": platform, "QT_SCALE_FACTOR": scale}
+        report = destination / "data" / "ui-verification" / "data" / "verification-result.json"
+        report.unlink(missing_ok=True)
+        check = subprocess.run([str(exe), "--verify-ui"], cwd=destination, env=check_environment, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30, creationflags=subprocess.CREATE_NO_WINDOW)
+        result = json.loads(report.read_text(encoding="utf-8")) if report.exists() else {"error": "No UI verification result"}
+        ui_checks.append({"platform": platform, "qt_scale_factor": scale, "exit_code": check.returncode, **result})
+        (ROOT / "artifacts" / "packaged-ui-checks.json").write_text(json.dumps(ui_checks, indent=2), encoding="utf-8")
+        assert check.returncode == 0 and "error" not in result and result.get("passed") == 6, f"Frozen UI failed: {ui_checks[-1]}"
+        screenshot = report.parent / "updated-ui.png"
+        shutil.copy2(screenshot, ROOT / "artifacts" / f"ui-packaged-updated-{platform}-{scale}.png")
+    print("Frozen UI: 6 interaction checks passed on offscreen and native Windows at 100%, 125%, 150% Qt scaling.")
 
 
 if __name__ == "__main__":

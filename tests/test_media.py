@@ -149,10 +149,12 @@ def test_full_engine_with_generated_media(root, source, tmp_path, monkeypatch):
     execute_download(root, task, lambda kind, **values: events.append({"event": kind, **values}))
     completed = [e for e in events if e["event"] == "completed"]
     assert len(completed) == 1 and Path(completed[0]["path"]).name == "003 - Авторский тест.mp3"
+    assert completed[0]["final_size"] == Path(completed[0]["path"]).stat().st_size
     assert probe(root, Path(completed[0]["path"]))["streams"][0]["codec_name"] == "mp3"
     events.clear()
     execute_download(root, task, lambda kind, **values: events.append({"event": kind, **values}))
     assert "пропущено" in events[-1]["note"]
+    assert events[-1]["final_size"] == Path(events[-1]["path"]).stat().st_size
     task["options"].update(output="mp4", height=720)
     with pytest.raises(UserError, match="720p недоступно"):
         execute_download(root, task, lambda *a, **k: None)

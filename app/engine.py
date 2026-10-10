@@ -268,6 +268,22 @@ def reserve_file(folder: Path, stem: str, extension: str, fingerprint: str, exis
     raise UserError("Не удалось выбрать свободное имя файла.")
 
 
+def download_progress(data: dict) -> dict:
+    """Report the current transfer only; never add audio and video totals."""
+    downloaded = max(0, int(data.get("downloaded_bytes") or 0))
+    exact = data.get("total_bytes")
+    estimate = data.get("total_bytes_estimate")
+    total = int(exact or estimate) if exact or estimate else None
+    info = data.get("info_dict") or {}
+    video = info.get("vcodec") not in (None, "none")
+    audio = info.get("acodec") not in (None, "none")
+    stream = "Видео + звук" if video and audio else "Видео" if video else "Звук" if audio else "Поток"
+    percent = min(99, downloaded / total * 100) if total else -1
+    if data.get("status") == "finished":
+        percent = 100
+    return {"progress": percent, "speed": data.get("speed") or 0, "eta": data.get("eta"), "downloaded_bytes": downloaded, "total_bytes": total, "total_estimated": not bool(exact) and bool(estimate), "stream_label": stream}
+
+
 def execute_download(root: Path, task: dict, emit: Emit) -> None:
     from yt_dlp import YoutubeDL
 
@@ -303,7 +319,7 @@ def execute_download(root: Path, task: dict, emit: Emit) -> None:
     fingerprint = hashlib.sha256(json.dumps([task["url"], output, height, bitrate if output == "mp3" else 0, options.get("compatible", False)], sort_keys=True).encode()).hexdigest()
     with reserve_file(folder, stem, output, fingerprint, options.get("existing", "skip")) as (target, receipt, skip):
         if skip:
-            emit("completed", path=str(target), note="Уже скачано · пропущено")
+            emit("completed", path=str(target), note="Уже скачано · пропущено", final_size=target.stat().st_size)
             return
         stage = folder / ".syom" / task["id"]
         stage.mkdir(exist_ok=True)
@@ -313,12 +329,10 @@ def execute_download(root: Path, task: dict, emit: Emit) -> None:
             nonlocal last_update
             now = time.monotonic()
             if data.get("status") == "downloading" and now - last_update >= 0.15:
-                total = data.get("total_bytes") or data.get("total_bytes_estimate")
-                percent = min(99, data.get("downloaded_bytes", 0) / total * 100) if total else -1
-                emit("progress", progress=percent, speed=data.get("speed") or 0, eta=data.get("eta"))
+                emit("progress", **download_progress(data))
                 last_update = now
             elif data.get("status") == "finished":
-                emit("progress", progress=100, speed=0, eta=0)
+                emit("progress", **{**download_progress(data), "speed": 0, "eta": 0})
 
         def postprocess(data):
             if data.get("status") == "started":
@@ -374,4 +388,4 @@ def execute_download(root: Path, task: dict, emit: Emit) -> None:
         except OSError:
             logging.warning("Could not save download receipt", exc_info=True)
         shutil.rmtree(stage, ignore_errors=True)
-        emit("completed", path=str(target), note=warning)
+        emit("completed", path=str(target), note=warning, final_size=target.stat().st_size)

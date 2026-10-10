@@ -15,7 +15,8 @@ from app.process import ManagedProcess
 from app.queue import DownloadQueue
 from app.storage import Storage, asset_root
 from app.ui.settings_dialog import SettingsDialog
-from app.ui.widgets import Canvas, Masthead, PlaylistModel, QueueDelegate, QueueModel, label
+from app.ui.chrome import TitleBar, WindowChrome
+from app.ui.widgets import Canvas, Masthead, PlaylistModel, PlaylistView, QueueDelegate, QueueModel, QueueSplitter, label
 
 
 def button(text, callback=None, role=""):
@@ -41,21 +42,30 @@ class MainWindow(QMainWindow):
         self.meta_result = None
         self.meta_cancelled = False
         self.closing = False
+        self._expanded_queue_height = self.prefs.queue_height
+        self._queue_scroll_position = 0
+        self._queue_restoring = False
+        self.ui_save_timer = QTimer(self)
+        self.ui_save_timer.setSingleShot(True)
+        self.ui_save_timer.setInterval(300)
+        self.ui_save_timer.timeout.connect(self.save_preferences)
         self.setWindowTitle("СЪЁМ · видео и звук")
         self.setWindowIcon(QIcon(str(asset_root() / "icon.svg")))
         self.setMinimumSize(880, 520)
         screen = QApplication.primaryScreen()
         if screen:
             available = screen.availableGeometry()
-            self.resize(max(880, min(1080, available.width() - 24)), max(520, min(850, available.height() - 48)))
+            self.resize(max(880, min(1080, available.width() - 24)), max(520, min(920, available.height() - 48)))
         else:
-            self.resize(1080, 850)
+            self.resize(1080, 920)
         self.build_ui()
+        self.chrome = WindowChrome(self)
         self.install_shortcuts()
         self.queue.changed.connect(self.queue_summary)
         self.queue.updated.connect(self.queue_summary)
         self.queue.error.connect(self.show_error)
         self.queue_summary()
+        QTimer.singleShot(0, self.restore_queue_layout)
         for name in ("ffmpeg.exe", "ffprobe.exe", "deno.exe"):
             if not (storage.root / "bin" / name).is_file():
                 QTimer.singleShot(0, lambda: self.show_error("Не хватает инструментов в bin. Запустите build.bat или используйте полную portable-папку."))
@@ -72,7 +82,14 @@ class MainWindow(QMainWindow):
         self.scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.scroll.setWidget(body)
-        self.setCentralWidget(self.scroll)
+        container = QWidget()
+        outer = QVBoxLayout(container)
+        outer.setContentsMargins(1, 1, 1, 1)
+        outer.setSpacing(0)
+        self.title_bar = TitleBar(self)
+        outer.addWidget(self.title_bar)
+        outer.addWidget(self.scroll, 1)
+        self.setCentralWidget(container)
         layout = QVBoxLayout(body)
         # Let the scroll canvas grow with the styled controls' real minimums.
         # A smaller fixed minimum lets QSplitter overlap its child panels.
@@ -119,8 +136,7 @@ class MainWindow(QMainWindow):
         self.detect_timer.timeout.connect(self.detect_link)
         self.link.textChanged.connect(lambda: self.detect_timer.start())
 
-        self.splitter = QSplitter(Qt.Orientation.Vertical)
-        self.splitter.setChildrenCollapsible(False)
+        self.splitter = QueueSplitter()
         center = QWidget()
         center.setMinimumHeight(350)
         center_layout = QHBoxLayout(center)
@@ -191,7 +207,7 @@ class MainWindow(QMainWindow):
         self.playlist_progress.hide()
         self.playlist_model = PlaylistModel(self)
         self.playlist_model.selection_changed.connect(self.selection_changed)
-        self.playlist_view = QTableView()
+        self.playlist_view = PlaylistView()
         self.playlist_view.setModel(self.playlist_model)
         self.playlist_view.setAlternatingRowColors(True)
         self.playlist_view.setShowGrid(False)
@@ -267,7 +283,8 @@ class MainWindow(QMainWindow):
         self.splitter.addWidget(center)
 
         queue_panel = QWidget()
-        queue_panel.setMinimumHeight(118)
+        self.queue_panel = queue_panel
+        queue_panel.setMinimumHeight(132)
         queue_layout = QVBoxLayout(queue_panel)
         queue_layout.setContentsMargins(0, 8, 0, 0)
         queue_layout.setSpacing(8)
@@ -277,9 +294,12 @@ class MainWindow(QMainWindow):
         queue_header.addWidget(self.queue_count)
         queue_header.addStretch()
         self.retry_button = button("Повторить ошибки", self.queue.retry_failed, "plain")
-        self.clear_button = button("Убрать готовые", self.queue.clear_finished, "plain")
+        self.clear_button = button("Очистить очередь", self.clear_queue, "plain")
+        self.collapse_button = button("Свернуть", self.toggle_queue, "plain")
+        self.collapse_button.setAccessibleName("Свернуть очередь")
         queue_header.addWidget(self.retry_button)
         queue_header.addWidget(self.clear_button)
+        queue_header.addWidget(self.collapse_button)
         queue_layout.addLayout(queue_header)
         self.queue_stack = QStackedWidget()
         queue_empty = QFrame()
@@ -288,22 +308,28 @@ class MainWindow(QMainWindow):
         qe.addWidget(label("Пока пусто. Добавьте материал и нажмите «Скачать».", "muted"))
         self.queue_stack.addWidget(queue_empty)
         self.queue_view = QListView()
+        self.queue_view.setMinimumHeight(78)
         self.queue_view.setUniformItemSizes(True)
         self.queue_view.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.queue_model = QueueModel(self.queue, self)
         self.queue_view.setModel(self.queue_model)
         self.queue_delegate = QueueDelegate(self.queue_view)
         self.queue_delegate.action.connect(self.queue_action)
+        self.queue_delegate.remove.connect(self.remove_queue_item)
         self.queue_view.setItemDelegate(self.queue_delegate)
         self.queue_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.queue_view.customContextMenuRequested.connect(self.queue_context_menu)
         self.queue_view.activated.connect(lambda idx: self.queue_action(idx.data(Qt.ItemDataRole.UserRole).id))
+        self.queue_delete = QShortcut(QKeySequence("Delete"), self.queue_view)
+        self.queue_delete.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self.queue_delete.activated.connect(lambda: self.remove_queue_item(self.queue_view.currentIndex().data(Qt.ItemDataRole.UserRole).id) if self.queue_view.currentIndex().isValid() else None)
         self.queue_stack.addWidget(self.queue_view)
         queue_layout.addWidget(self.queue_stack, 1)
         self.splitter.addWidget(queue_panel)
         self.splitter.setStretchFactor(0, 3)
         self.splitter.setStretchFactor(1, 1)
         self.splitter.setSizes([380, 120])
+        self.splitter.splitterMoved.connect(self.queue_resized)
         layout.addWidget(self.splitter, 1)
         footer = QHBoxLayout()
         self.summary = label("Всё готово к работе", "muted")
@@ -316,6 +342,54 @@ class MainWindow(QMainWindow):
         self.format.currentIndexChanged.connect(self.format_changed)
         self.quality.currentIndexChanged.connect(self.quality_changed)
         self.compatible.toggled.connect(self.compatibility_changed)
+
+    def restore_queue_layout(self):
+        self.set_queue_collapsed(self.prefs.queue_collapsed, persist=False)
+
+    def queue_resized(self, *_):
+        if not self._queue_restoring and not self.prefs.queue_collapsed:
+            self._expanded_queue_height = self.queue_panel.height()
+            self.prefs.queue_height = self._expanded_queue_height
+            self.ui_save_timer.start()
+
+    def toggle_queue(self):
+        self.set_queue_collapsed(not self.prefs.queue_collapsed)
+
+    def set_queue_collapsed(self, collapsed: bool, persist: bool = True):
+        self._queue_restoring = True
+        if collapsed and not self.prefs.queue_collapsed:
+            self._expanded_queue_height = self.queue_panel.height()
+            self._queue_scroll_position = self.queue_view.verticalScrollBar().value()
+        self.prefs.queue_collapsed = collapsed
+        self.prefs.queue_height = self._expanded_queue_height
+        self.queue_stack.setVisible(not collapsed)
+        self.queue_panel.setMinimumHeight(44 if collapsed else 132)
+        self.queue_panel.setMaximumHeight(44 if collapsed else 16777215)
+        text = "Развернуть" if collapsed else "Свернуть"
+        self.collapse_button.setText(text)
+        self.collapse_button.setAccessibleName("Развернуть очередь" if collapsed else "Свернуть очередь")
+        self.collapse_button.setToolTip("Вернуть прежнюю высоту очереди" if collapsed else "Оставить только заголовок очереди")
+        self.scroll.widget().layout().activate()
+        available = self.splitter.height() - self.splitter.handleWidth()
+        height = 44 if collapsed else max(132, self._expanded_queue_height)
+        self.splitter.setSizes([max(self.splitter.widget(0).minimumHeight(), available - height), height])
+        if not collapsed:
+            self.queue_view.verticalScrollBar().setValue(self._queue_scroll_position)
+        self._queue_restoring = False
+        if persist:
+            self.save_preferences()
+
+    def remove_queue_item(self, identity):
+        task = next((item for item in self.queue.tasks if item.id == identity), None)
+        if task:
+            self.queue.remove(task)
+
+    def clear_queue(self):
+        if self.queue.running or any(task.state in ACTIVE for task in self.queue.tasks):
+            answer = QMessageBox.question(self, "Очистить очередь", "Есть активные загрузки. Остановить их и очистить очередь?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        self.queue.clear()
 
     def install_shortcuts(self):
         for key, callback in (("Ctrl+L", lambda: (self.link.setFocus(), self.link.selectAll())), ("Ctrl+Shift+V", self.paste), ("Ctrl+Return", self.start_download), ("Ctrl+,", self.settings)):
@@ -628,6 +702,8 @@ class MainWindow(QMainWindow):
             menu.addAction("Повторить", lambda: self.queue.retry(task))
         else:
             menu.addAction("Отменить", lambda: self.queue.cancel(task))
+        menu.addSeparator()
+        menu.addAction("Убрать из очереди", lambda: self.queue.remove(task))
         if task.error:
             menu.addAction("Показать ошибку", lambda: QMessageBox.information(self, "Не удалось скачать", task.error))
         menu.exec(self.queue_view.viewport().mapToGlobal(position))
@@ -642,7 +718,7 @@ class MainWindow(QMainWindow):
         self.queue_count.setText(f"{len(tasks)} файлов" if tasks else "")
         self.queue_stack.setCurrentIndex(1 if tasks else 0)
         self.retry_button.setEnabled(bool(failed))
-        self.clear_button.setEnabled(bool(completed))
+        self.clear_button.setEnabled(bool(tasks))
         self.summary.setText(f"Готово {completed} из {len(tasks)}  ·  Скачивается {active}  ·  Ожидает {waiting}  ·  Ошибок {failed}  ·  Отменено {cancelled}" if tasks else "Без рекламы. Файлы и настройки — у вас.")
         collection = self.current_collection()
         related = [t for t in tasks if collection and collection["playlist"] and t.playlist == collection["title"]]
@@ -671,6 +747,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         self.closing = True
+        self.ui_save_timer.stop()
         self.detect_timer.stop()
         self.metadata_waiting.clear()
         if self.metadata_process:

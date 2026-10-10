@@ -17,6 +17,11 @@ def main():
     release = ROOT / "artifacts" / "relocation-test" / "Съём Portable"
     exe = release / "ytdwnldr.exe"
     folder = ROOT / "artifacts" / "live-downloads"
+    if len(sys.argv) > 3:
+        folder = ROOT / "artifacts" / sys.argv[3]
+        if not folder.resolve().is_relative_to((ROOT / "artifacts").resolve()):
+            raise SystemExit("Verification downloads must stay inside artifacts.")
+    report = folder / "results.json" if len(sys.argv) > 3 else ROOT / "artifacts" / "live-results.json"
     folder.mkdir(exist_ok=True)
     environment = os.environ.copy()
     environment["PATH"] = os.path.join(os.environ["SystemRoot"], "System32")
@@ -38,10 +43,11 @@ def main():
         result = {"output": output, "seconds": round(time.perf_counter() - started, 2), "exit_code": completed.returncode, "events": events, "stderr": completed.stderr[-2000:]}
         done = next((e for e in events if e["event"] == "completed"), None)
         if done:
+            assert done.get("final_size") == Path(done["path"]).stat().st_size, "Worker did not report the actual output size"
             probed = subprocess.run([str(release / "bin" / "ffprobe.exe"), "-v", "error", "-show_format", "-show_streams", "-of", "json", done["path"]], capture_output=True, text=True, encoding="utf-8", check=True, creationflags=subprocess.CREATE_NO_WINDOW)
             result["ffprobe"] = json.loads(probed.stdout)
         results.append(result)
-        (ROOT / "artifacts" / "live-results.json").write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
+        report.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
         print(json.dumps({"output": output, "exit_code": completed.returncode, "final_event": events[-1] if events else None}, ensure_ascii=True), flush=True)
     assert all(r["exit_code"] == 0 and "ffprobe" in r for r in results), "Live download failed; see artifacts/live-results.json"
 

@@ -87,6 +87,33 @@ def duration_text(seconds: int | float | None) -> str:
     return f"{total // 60}:{total % 60:02d}"
 
 
+def byte_text(value: int | float) -> str:
+    size = max(0, value)
+    for unit in ("Б", "КБ", "МБ", "ГБ", "ТБ"):
+        if size < 1024 or unit == "ТБ":
+            return f"{int(size)} {unit}" if unit == "Б" else f"{size:.1f} {unit}"
+        size /= 1024
+
+
+def task_size_text(task: Task) -> str:
+    if task.state == State.COMPLETED:
+        return "Файл: " + byte_text(task.final_size) if task.final_size is not None else "Размер файла неизвестен"
+    if task.state not in ACTIVE or not task.stream_label:
+        return ""
+    prefix = task.stream_label + ": "
+    text = prefix + byte_text(task.downloaded_bytes)
+    if task.state == State.DOWNLOADING:
+        if task.total_bytes is not None:
+            text += " / " + ("~" if task.total_estimated else "") + byte_text(task.total_bytes)
+        else:
+            text += " загружено"
+        if task.progress >= 0:
+            text += f" · {int(task.progress)}%"
+    else:
+        text = "Источник · " + text
+    return text
+
+
 def friendly_error(message: str) -> str:
     lower = message.lower()
     for patterns, russian in [
@@ -116,6 +143,8 @@ class Preferences:
     playlist_folder: bool = True
     naming: str = "title"
     existing: str = "skip"
+    queue_height: int = 160
+    queue_collapsed: bool = False
 
     @classmethod
     def from_dict(cls, raw: dict) -> Preferences:
@@ -130,6 +159,8 @@ class Preferences:
         obj.existing = obj.existing if obj.existing in {"skip", "rename"} else "skip"
         obj.compatible = obj.compatible if isinstance(obj.compatible, bool) else False
         obj.playlist_folder = obj.playlist_folder if isinstance(obj.playlist_folder, bool) else True
+        obj.queue_height = min(1200, max(120, obj.queue_height)) if type(obj.queue_height) is int else 160
+        obj.queue_collapsed = obj.queue_collapsed if isinstance(obj.queue_collapsed, bool) else False
         return obj
 
 
@@ -149,6 +180,11 @@ class Task:
     error: str = ""
     path: str = ""
     note: str = ""
+    downloaded_bytes: int = 0
+    total_bytes: int | None = None
+    total_estimated: bool = False
+    stream_label: str = ""
+    final_size: int | None = None
 
     @property
     def duplicate_key(self) -> tuple:
