@@ -1,0 +1,55 @@
+{
+  "artifacts": [
+    {
+      "name": "ffmpeg-9.0.2-essentials_build.zip",
+      "url": "https://github.com/GyanD/codexffmpeg/releases/download/9.0.2/ffmpeg-9.0.2-essentials_build.zip",
+      "publisher_sha256": "60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba",
+      "sha256": "60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba",
+      "zip_members": {
+        "/bin/ffmpeg.exe": "bin/ffmpeg.exe",
+        "/bin/ffprobe.exe": "bin/ffprobe.exe",
+        "/LICENSE": "licenses/FFmpeg-LICENSE.txt",
+        "/README.txt": "licenses/FFmpeg-BUILD.txt"
+      }
+    },
+    {
+      "name": "deno-2.9.7.zip",
+      "url": "https://github.com/denoland/deno/releases/download/v2.9.7/deno-x86_64-pc-windows-msvc.zip",
+      "publisher_sha256": "a0c3101b4158d1dfb7d6a78a7bf0f3de80c96bb423c152beec8beb22786f2238",
+      "sha256": "a0c3101b4158d1dfb7d6a78a7bf0f3de80c96bb423c152beec8beb22786f2238",
+      "zip_members": {
+        "deno.exe": "bin/deno.exe"
+      }
+    },
+    {
+      "name": "Deno-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/denoland/deno/v2.9.7/LICENSE.md",
+      "sha256": "f62497fffecc0852960c8d3e6934b9db86d16396e9b604072e923892cae3a588",
+      "destination": "licenses/Deno-LICENSE.txt"
+    },
+    {
+      "name": "Oswald.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/8b0a1d0f5983c89bc2b93f1b5fb55f9e252744b5/ofl/oswald/Oswald%5Bwght%5D.ttf",
+      "sha256": "5b38c246e255a12f5712d640d56bcced0472466fc68983d2d0410ec0457c2817",
+      "destination": "assets/fonts/Oswald.ttf"
+    },
+    {
+      "name": "Oswald-OFL.txt",
+      "url": "https://raw.githubusercontent.com/google/fonts/8b0a1d0f5983c89bc2b93f1b5fb55f9e252744b5/ofl/oswald/OFL.txt",
+      "sha256": "0fd731a904b729a4e02eaf5e8ebd06783edd9abe400e8882760160230675b652",
+      "destination": "licenses/Oswald-OFL.txt"
+    },
+    {
+      "name": "GolosText.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/c1eda9233c33ad7775b27efd794f931095cf6133/ofl/golostext/GolosText%5Bwght%5D.ttf",
+      "sha256": "17bb58fb69aec2dfb047a2ebf52534023e9b688c97a6b7ac795b0a72912c2063",
+      "destination": "assets/fonts/GolosText.ttf"
+    },
+    {
+      "name": "GolosText-OFL.txt",
+      "url": "https://raw.githubusercontent.com/google/fonts/c1eda9233c33ad7775b27efd794f931095cf6133/ofl/golostext/OFL.txt",
+      "sha256": "ff532f9e8789f09a9fdffc3c0954eedfb0a48be77b2e2eb90f5f82e4f347f50c",
+      "destination": "licenses/GolosText-OFL.txt"
+    }
+  ]
+}
